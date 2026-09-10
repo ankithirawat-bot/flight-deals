@@ -34,31 +34,54 @@ function getHistoricalStats(priceHistory, routeKey) {
   return { avg, min, count: prices.length };
 }
 
-async function searchFlights(origin, dest) {
+async function searchFlights(origin, dest, type = "round") {
   const apiKey = process.env.IGNAV_API_KEY;
   if (!apiKey) throw new Error("Missing IGNAV_API_KEY");
 
   let bestFlight = null;
   let bestPrice = Infinity;
 
-  for (let w = 1; w <= 4; w++) {
-    const dep = getDateStr(w * 7);
-    const ret = getDateStr(w * 7 + 7);
-    try {
-      const res = await fetch("https://ignav.com/api/fares/round-trip", {
-        method: "POST",
-        headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({ origin, destination: dest, departure_date: dep, return_date: ret }),
-      });
-      if (!res.ok) continue;
-      const json = await res.json();
-      for (const it of (json.itineraries || [])) {
-        const p = it.price?.amount || Infinity;
-        if (p < bestPrice) { bestPrice = p; bestFlight = it; }
-      }
-    } catch {}
-    await new Promise(r => setTimeout(r, 200));
+  if (type === "oneway") {
+    // One-way: search next 4 weeks
+    for (let w = 1; w <= 4; w++) {
+      const dep = getDateStr(w * 7);
+      try {
+        const res = await fetch("https://ignav.com/api/fares/one-way", {
+          method: "POST",
+          headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ origin, destination: dest, departure_date: dep }),
+        });
+        if (!res.ok) continue;
+        const json = await res.json();
+        for (const it of (json.itineraries || [])) {
+          const p = it.price?.amount || Infinity;
+          if (p < bestPrice) { bestPrice = p; bestFlight = it; }
+        }
+      } catch {}
+      await new Promise(r => setTimeout(r, 200));
+    }
+  } else {
+    // Round-trip: search next 4 weeks
+    for (let w = 1; w <= 4; w++) {
+      const dep = getDateStr(w * 7);
+      const ret = getDateStr(w * 7 + 7);
+      try {
+        const res = await fetch("https://ignav.com/api/fares/round-trip", {
+          method: "POST",
+          headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ origin, destination: dest, departure_date: dep, return_date: ret }),
+        });
+        if (!res.ok) continue;
+        const json = await res.json();
+        for (const it of (json.itineraries || [])) {
+          const p = it.price?.amount || Infinity;
+          if (p < bestPrice) { bestPrice = p; bestFlight = it; }
+        }
+      } catch {}
+      await new Promise(r => setTimeout(r, 200));
+    }
   }
+
   return bestFlight;
 }
 
@@ -79,28 +102,58 @@ async function getUpdates(offset) {
 }
 
 async function handleCommand(chatId, text) {
-  const msg = text.trim().toUpperCase().replace(/\s+/g, "-");
-  const match = msg.match(/^([A-Z]{3})[\s\-\>→]+([A-Z]{3})$/);
+  const clean = text.trim().toUpperCase();
+
+  // Check for one-way: "oneway DEL BKK" or "ow DEL-BKK"
+  let type = "round";
+  let routeText = clean;
+  if (clean.startsWith("ONEWAY") || clean.startsWith("OW ")) {
+    type = "oneway";
+    routeText = clean.replace(/^ONEWAY\s+|^OW\s+/, "");
+  }
+
+  const match = routeText.match(/^([A-Z]{3})[\s\-\>→]+([A-Z]{3})$/);
   if (!match) {
-    await sendMessage(chatId, "🔍 *How to search:*\n\nType a route:\n  DEL BKK\n  BOM-LHR\n  BLR → SIN");
+    await sendMessage(chatId, [
+      `🔍 *How to search:*`,
+      ``,
+      `*Round-trip (default):*`,
+      `  DEL BKK`,
+      `  BOM-LHR`,
+      ``,
+      `*One-way:*`,
+      `  oneway DEL BKK`,
+      `  ow BOM-LHR`,
+    ].join("\n"));
     return;
   }
+
   const [, origin, dest] = match;
-  await sendMessage(chatId, `Searching ${origin} → ${dest}...`);
-  const best = await searchFlights(origin, dest);
+  const label = type === "oneway" ? "One-way" : "Round-trip";
+  await sendMessage(chatId, `Searching ${origin} → ${dest} (${label})...`);
+
+  const best = await searchFlights(origin, dest, type);
   if (!best) { await sendMessage(chatId, `No fares found for ${origin} → ${dest}`); return; }
+
   const priceInr = Math.round(best.price.amount * CONFIG.usdToInr);
   const depDate = best.outbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
-  const retDate = best.inbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
   const airline = best.outbound?.carrier || "Multiple";
   const stops = (best.outbound?.segments?.length || 1) - 1;
-  await sendMessage(chatId, [
-    `✅ *${origin} → ${dest}*`, ``,
-    `💰 *₹${priceInr.toLocaleString("en-IN")}* round-trip`,
-    `🗓️ ${depDate} → ${retDate}`,
+
+  const lines = [
+    `✅ *${origin} → ${dest}* (${label})`, ``,
+    `💰 *₹${priceInr.toLocaleString("en-IN")}*`,
+    `🗓️ ${depDate}`,
     `✈️ ${airline}`,
     `🚦 ${stops === 0 ? "Nonstop" : stops + " stop(s)"}`,
-  ].join("\n"));
+  ];
+
+  if (type === "round") {
+    const retDate = best.inbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
+    lines.splice(3, 0, `🔄 Return: ${retDate}`);
+  }
+
+  await sendMessage(chatId, lines.join("\n"));
 }
 
 // Keep-alive endpoint
@@ -124,7 +177,17 @@ async function runBot() {
         if (!msg?.text) continue;
         console.log(`[${msg.from?.first_name}] ${msg.text}`);
         if (msg.text === "/start" || msg.text === "/help") {
-          await sendMessage(msg.chat.id, "✈️ *Flight Deal Bot*\n\nType a route to search:\n  DEL BKK\n  BOM-LHR");
+          await sendMessage(msg.chat.id, [
+            `✈️ *Flight Deal Bot*`,
+            ``,
+            `*Round-trip:*`,
+            `  DEL BKK`,
+            `  BOM-LHR`,
+            ``,
+            `*One-way:*`,
+            `  oneway DEL BKK`,
+            `  ow BOM-LHR`,
+          ].join("\n"));
         } else {
           await handleCommand(msg.chat.id, msg.text);
         }
