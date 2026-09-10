@@ -1,14 +1,15 @@
 {
   "name": "flight-deals",
   "version": "1.0.0",
-  "description": "Flight deal scanner for Indian routes using Amadeus API",
+  "description": "Flight deal scanner for Indian routes",
   "type": "module",
-  "main": "scanner.js",
+  "main": "bot.js",
   "scripts": {
-    "start": "node scanner.js",
+    "start": "node bot.js",
     "scan": "node scanner.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0"
   }
 }

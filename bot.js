@@ -1,17 +1,18 @@
+import express from "express";
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 
 dotenv.config();
 
+const app = express();
+const PORT = process.env.PORT || 3000;
+
 const CONFIG = {
   usdToInr: 84.0,
   priceHistoryPath: path.resolve("./data/price_history.json"),
 };
 
-// ==========================================
-// HELPERS
-// ==========================================
 function getDateStr(daysFromNow) {
   const d = new Date();
   d.setDate(d.getDate() + daysFromNow);
@@ -33,9 +34,6 @@ function getHistoricalStats(priceHistory, routeKey) {
   return { avg, min, count: prices.length };
 }
 
-// ==========================================
-// FLIGHT SEARCH
-// ==========================================
 async function searchFlights(origin, dest) {
   const apiKey = process.env.IGNAV_API_KEY;
   if (!apiKey) throw new Error("Missing IGNAV_API_KEY");
@@ -46,16 +44,13 @@ async function searchFlights(origin, dest) {
   for (let w = 1; w <= 4; w++) {
     const dep = getDateStr(w * 7);
     const ret = getDateStr(w * 7 + 7);
-
     try {
       const res = await fetch("https://ignav.com/api/fares/round-trip", {
         method: "POST",
         headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({ origin, destination: dest, departure_date: dep, return_date: ret }),
       });
-
       if (!res.ok) continue;
-
       const json = await res.json();
       for (const it of (json.itineraries || [])) {
         const p = it.price?.amount || Infinity;
@@ -64,130 +59,78 @@ async function searchFlights(origin, dest) {
     } catch {}
     await new Promise(r => setTimeout(r, 200));
   }
-
   return bestFlight;
 }
 
-// ==========================================
-// TELEGRAM BOT
-// ==========================================
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const API_URL = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-async function sendMessage(chatId, text, parseMode = "Markdown") {
-  await fetch(`${API_URL}/sendMessage`, {
+async function sendMessage(chatId, text) {
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: parseMode, disable_web_page_preview: false }),
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown", disable_web_page_preview: false }),
   });
 }
 
 async function getUpdates(offset) {
-  const res = await fetch(`${API_URL}/getUpdates?offset=${offset}&timeout=30`);
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${offset}&timeout=30`);
   return res.json();
 }
 
-// ==========================================
-// COMMAND HANDLER
-// ==========================================
 async function handleCommand(chatId, text) {
   const msg = text.trim().toUpperCase().replace(/\s+/g, "-");
-
-  // Parse route: DEL-BKK or DEL BKK or DEL->BKK
   const match = msg.match(/^([A-Z]{3})[\s\-\>→]+([A-Z]{3})$/);
   if (!match) {
-    await sendMessage(chatId, [
-      `🔍 *How to search:*`,
-      ``,
-      `Just type a route:`,
-      `  DEL BKK`,
-      `  BOM-LHR`,
-      `  BLR → SIN`,
-      ``,
-      `Or use /search DEL-BKK`,
-      `Or /all to scan all routes`,
-    ].join("\n"));
+    await sendMessage(chatId, "🔍 *How to search:*\n\nType a route:\n  DEL BKK\n  BOM-LHR\n  BLR → SIN");
     return;
   }
-
   const [, origin, dest] = match;
-  await sendMessage(chatId, `Searching ${origin} → ${dest} across 4 weeks...`);
-
+  await sendMessage(chatId, `Searching ${origin} → ${dest}...`);
   const best = await searchFlights(origin, dest);
-  if (!best) {
-    await sendMessage(chatId, `No fares found for ${origin} → ${dest}`);
-    return;
-  }
-
+  if (!best) { await sendMessage(chatId, `No fares found for ${origin} → ${dest}`); return; }
   const priceInr = Math.round(best.price.amount * CONFIG.usdToInr);
   const depDate = best.outbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
   const retDate = best.inbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
   const airline = best.outbound?.carrier || "Multiple";
   const stops = (best.outbound?.segments?.length || 1) - 1;
-
-  const priceHistory = loadJSON(CONFIG.priceHistoryPath);
-  const stats = getHistoricalStats(priceHistory, `${origin}-${dest}`);
-
-  const lines = [
-    `✅ *${origin} → ${dest}*`,
-    ``,
+  await sendMessage(chatId, [
+    `✅ *${origin} → ${dest}*`, ``,
     `💰 *₹${priceInr.toLocaleString("en-IN")}* round-trip`,
     `🗓️ ${depDate} → ${retDate}`,
     `✈️ ${airline}`,
     `🚦 ${stops === 0 ? "Nonstop" : stops + " stop(s)"}`,
-  ];
-
-  if (stats) {
-    lines.push(`📈 History: avg ₹${stats.avg.toLocaleString("en-IN")} | low ₹${stats.min.toLocaleString("en-IN")}`);
-    if (priceInr < stats.avg * 0.85) lines.push(`🔥 *Below average price!*`);
-  }
-
-  await sendMessage(chatId, lines.join("\n"));
+  ].join("\n"));
 }
 
-// ==========================================
-// BOT POLLING LOOP
-// ==========================================
-async function runBot() {
-  console.log("Bot started. Listening for messages...");
-  let offset = 0;
+// Keep-alive endpoint
+app.get("/", (req, res) => res.send("Bot is running"));
+app.get("/health", (req, res) => res.json({ status: "ok" }));
 
+// Start Express to keep Render alive
+app.listen(PORT, () => console.log(`Server on port ${PORT}`));
+
+// Start Telegram bot polling
+async function runBot() {
+  console.log("Bot started...");
+  let offset = 0;
   while (true) {
     try {
       const data = await getUpdates(offset);
-      if (!data.ok) {
-        console.error("getUpdates failed:", data);
-        await new Promise(r => setTimeout(r, 5000));
-        continue;
-      }
-
+      if (!data.ok) { await new Promise(r => setTimeout(r, 5000)); continue; }
       for (const update of data.result) {
         offset = update.update_id + 1;
         const msg = update.message;
         if (!msg?.text) continue;
-
-        const chatId = msg.chat.id;
-        const text = msg.text;
-
-        console.log(`[${msg.from?.first_name || chatId}] ${text}`);
-
-        if (text === "/start" || text === "/help") {
-          await sendMessage(chatId, [
-            `✈️ *Flight Deal Bot*`,
-            ``,
-            `Type any route to search:`,
-            `  DEL BKK`,
-            `  BOM-LHR`,
-            `  BLR → SIN`,
-            ``,
-            `I'll find the cheapest round-trip fare across 4 weeks and send you the deal.`,
-          ].join("\n"));
+        console.log(`[${msg.from?.first_name}] ${msg.text}`);
+        if (msg.text === "/start" || msg.text === "/help") {
+          await sendMessage(msg.chat.id, "✈️ *Flight Deal Bot*\n\nType a route to search:\n  DEL BKK\n  BOM-LHR");
         } else {
-          await handleCommand(chatId, text);
+          await handleCommand(msg.chat.id, msg.text);
         }
       }
     } catch (err) {
-      console.error("Polling error:", err.message);
+      console.error("Error:", err.message);
       await new Promise(r => setTimeout(r, 5000));
     }
   }
