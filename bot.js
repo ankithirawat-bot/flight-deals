@@ -35,64 +35,36 @@ function getHistoricalStats(priceHistory, routeKey) {
 }
 
 async function searchFlights(origin, dest, type = "round") {
-  const apiKey = process.env.IGNAV_API_KEY;
-  if (!apiKey) throw new Error("Missing IGNAV_API_KEY");
+  const apiKey = process.env.FLIGHTAPI_KEY;
+  if (!apiKey) throw new Error("Missing FLIGHTAPI_KEY in .env");
 
   let bestFlight = null;
   let bestPrice = Infinity;
 
-  if (type === "oneway") {
-    for (let w = 1; w <= 4; w++) {
-      const dep = getDateStr(w * 7);
-      try {
-        const res = await fetch("https://ignav.com/api/fares/one-way", {
-          method: "POST",
-          headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
-          body: JSON.stringify({ origin, destination: dest, departure_date: dep }),
-        });
-        if (!res.ok) continue;
-        const json = await res.json();
-        for (const it of (json.itineraries || [])) {
-          const p = it.price?.amount || Infinity;
-          if (p < bestPrice) { bestPrice = p; bestFlight = it; }
-        }
-      } catch {}
-      await new Promise(r => setTimeout(r, 200));
-    }
-  } else {
-    for (let w = 1; w <= 4; w++) {
-      const dep = getDateStr(w * 7);
-      const ret = getDateStr(w * 7 + 7);
-      try {
-        const res = await fetch("https://ignav.com/api/fares/round-trip", {
-          method: "POST",
-          headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
-          body: JSON.stringify({ origin, destination: dest, departure_date: dep, return_date: ret }),
-        });
-        if (!res.ok) continue;
-        const json = await res.json();
-        for (const it of (json.itineraries || [])) {
-          const p = it.price?.amount || Infinity;
-          if (p < bestPrice) { bestPrice = p; bestFlight = it; }
-        }
-      } catch {}
-      await new Promise(r => setTimeout(r, 200));
-    }
-  }
+  for (let w = 1; w <= 4; w++) {
+    const dep = getDateStr(w * 7);
+    const ret = getDateStr(w * 7 + 7);
 
-  // Get booking links if we have a flight
-  if (bestFlight?.ignav_id) {
     try {
-      const res = await fetch("https://ignav.com/api/fares/booking-links", {
-        method: "POST",
-        headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({ ignav_id: bestFlight.ignav_id }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        bestFlight._bookingLinks = data.booking_options || [];
+      const url = type === "oneway"
+        ? `https://api.flightapi.io/onewaytrip/${apiKey}/${origin}/${dest}/${dep}/1/0/0/Economy/INR`
+        : `https://api.flightapi.io/roundtrip/${apiKey}/${origin}/${dest}/${dep}/${ret}/1/0/0/Economy/INR`;
+
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const json = await res.json();
+      const itins = json.itineraries || [];
+      for (const it of itins) {
+        const price = it.pricing_options?.[0]?.price?.amount || Infinity;
+        if (price < bestPrice) {
+          bestPrice = price;
+          bestFlight = it;
+          bestFlight._legs = json.legs || [];
+          bestFlight._segments = json.segments || [];
+        }
       }
     } catch {}
+    await new Promise(r => setTimeout(r, 500));
   }
 
   return bestFlight;
@@ -148,41 +120,25 @@ async function handleCommand(chatId, text) {
   const best = await searchFlights(origin, dest, type);
   if (!best) { await sendMessage(chatId, `No fares found for ${origin} → ${dest}`); return; }
 
-  const priceInr = Math.round(best.price.amount * CONFIG.usdToInr);
-  const depDate = best.outbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
-  const airline = best.outbound?.carrier || "Multiple";
-  const stops = (best.outbound?.segments?.length || 1) - 1;
+  const priceInr = Math.round(best.pricing_options?.[0]?.price?.amount || 0);
+  const depLeg = best._legs?.[0];
+  const retLeg = best._legs?.[1];
+  const depDate = depLeg?.departureDateTime?.split("T")[0] || "TBA";
+  const retDate = retLeg?.departureDateTime?.split("T")[0] || "TBA";
+  const airline = depLeg?.airlineCodes?.[0] || "Multiple";
+  const stops = depLeg?.stopoversCount || 0;
 
   const lines = [
     `✅ *${origin} → ${dest}* (${label})`, ``,
     `💰 *₹${priceInr.toLocaleString("en-IN")}*`,
     `🗓️ ${depDate}`,
-    `✈️ ${airline}`,
-    `🚦 ${stops === 0 ? "Nonstop" : stops + " stop(s)"}`,
   ];
 
-  if (type === "round") {
-    const retDate = best.inbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
-    lines.splice(3, 0, `🔄 Return: ${retDate}`);
-  }
+  if (type === "round") lines.push(`🔄 Return: ${retDate}`);
+  lines.push(`✈️ ${airline}`, `🚦 ${stops === 0 ? "Nonstop" : stops + " stop(s)"}`);
 
-  // Add booking links
-  const bookingLinks = best._bookingLinks || [];
-  if (bookingLinks.length > 0) {
-    lines.push(``, `🔗 *Book now:*`);
-    for (const option of bookingLinks.slice(0, 3)) {
-      const links = option.links || [];
-      for (const link of links.slice(0, 2)) {
-        if (link.url) {
-          lines.push(`• [${link.provider || "Book"}](${link.url})`);
-        }
-      }
-    }
-  } else {
-    // Fallback to Google Flights
-    const gfLink = `https://www.google.com/travel/flights?q=Flights+to+${dest}+from+${origin}`;
-    lines.push(``, `🔗 [Search on Google Flights](${gfLink})`);
-  }
+  const gfLink = `https://www.google.com/travel/flights?q=Flights+to+${dest}+from+${origin}`;
+  lines.push(``, `[Book on Google Flights](${gfLink})`);
 
   await sendMessage(chatId, lines.join("\n"));
 }

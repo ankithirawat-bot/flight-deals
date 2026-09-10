@@ -182,47 +182,32 @@ function getDateStr(daysFromNow) {
 // IGNAV FLIGHT API
 // ==========================================
 async function searchFlights(origin, dest) {
-  const apiKey = process.env.IGNAV_API_KEY;
-  if (!apiKey) throw new Error("Missing IGNAV_API_KEY in .env");
+  const apiKey = process.env.FLIGHTAPI_KEY;
+  if (!apiKey) throw new Error("Missing FLIGHTAPI_KEY in .env — sign up at https://api.flightapi.io");
 
   let bestFlight = null;
   let bestPrice = Infinity;
 
-    for (const window of CONFIG.dateWindows) {
-    const body = { origin, destination: dest, departure_date: getDateStr(window.dep), return_date: getDateStr(window.ret) };
-    const res = await fetch("https://ignav.com/api/fares/round-trip", {
-      method: "POST",
-      headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) continue;
-
-    const json = await res.json();
-    for (const it of (json.itineraries || [])) {
-      const price = it.price?.amount || Infinity;
-      if (price < bestPrice) {
-        bestPrice = price;
-        bestFlight = it;
-      }
-    }
-
-    await new Promise(r => setTimeout(r, 200));
-  }
-
-  // Get booking links
-  if (bestFlight?.ignav_id) {
+  for (const window of CONFIG.dateWindows) {
+    const dep = getDateStr(window.dep);
+    const ret = getDateStr(window.ret);
+    const url = `https://api.flightapi.io/roundtrip/${apiKey}/${origin}/${dest}/${dep}/${ret}/1/0/0/Economy/INR`;
     try {
-      const res = await fetch("https://ignav.com/api/fares/booking-links", {
-        method: "POST",
-        headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({ ignav_id: bestFlight.ignav_id }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        bestFlight._bookingLinks = data.booking_options || [];
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const json = await res.json();
+      const itins = json.itineraries || [];
+      for (const it of itins) {
+        const price = it.pricing_options?.[0]?.price?.amount || Infinity;
+        if (price < bestPrice) {
+          bestPrice = price;
+          bestFlight = it;
+          bestFlight._legs = json.legs || [];
+          bestFlight._segments = json.segments || [];
+        }
       }
     } catch {}
+    await new Promise(r => setTimeout(r, 500));
   }
 
   return bestFlight;
@@ -294,16 +279,19 @@ async function runEngine() {
     for (const origin of route.origins) {
       process.stdout.write(`  ${origin} -> ${route.dest}... `);
       const best = await searchFlights(origin, route.dest);
-      if (best && (best.price?.amount || Infinity) < bestPriceOverall) {
-        bestPriceOverall = best.price.amount;
-        bestOverall = best;
-        bestOrigin = origin;
+      if (best) {
+        const price = best.pricing_options?.[0]?.price?.amount || Infinity;
+        if (price < bestPriceOverall) {
+          bestPriceOverall = price;
+          bestOverall = best;
+          bestOrigin = origin;
+        }
       }
     }
 
     if (!bestOverall) { console.log(`${route.name}: no results`); continue; }
 
-    const priceInr = Math.round(bestOverall.price.amount * CONFIG.usdToInr);
+    const priceInr = Math.round(bestOverall.pricing_options[0].price.amount);
     const routeKey = `${bestOrigin}-${route.dest}`;
     const stats = getHistoricalStats(priceHistory, routeKey);
 
@@ -332,9 +320,11 @@ async function runEngine() {
       }
 
       const discountPct = Math.round(((route.baselineInr - priceInr) / route.baselineInr) * 100);
-      const depDate = bestOverall.outbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
-      const retDate = bestOverall.inbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
-      const airline = bestOverall.outbound?.carrier || "Multiple";
+      const depLeg = bestOverall._legs?.[0];
+      const retLeg = bestOverall._legs?.[1];
+      const depDate = depLeg?.departureDateTime?.split("T")[0] || "TBA";
+      const retDate = retLeg?.departureDateTime?.split("T")[0] || "TBA";
+      const airline = depLeg?.airlineCodes?.[0] || "Multiple";
 
       const lines = [
         `${dealLabel}`,
@@ -347,19 +337,8 @@ async function runEngine() {
       if (stats) lines.push(`📈 History: avg ₹${stats.avg.toLocaleString("en-IN")} | low ₹${stats.min.toLocaleString("en-IN")}`);
       lines.push(``, `🗓️ ${depDate} → ${retDate}`, `✈️ ${airline}`, `🛂 ${route.visa}`);
 
-      // Add booking links
-      const bookingLinks = bestOverall._bookingLinks || [];
-      if (bookingLinks.length > 0) {
-        lines.push(``, `🔗 *Book:*`);
-        for (const option of bookingLinks.slice(0, 2)) {
-          for (const link of (option.links || []).slice(0, 1)) {
-            if (link.url) lines.push(`[${link.provider || "Book"}](${link.url})`);
-          }
-        }
-      } else {
-        const gfLink = `https://www.google.com/travel/flights?q=Flights+to+${route.dest}+from+${bestOrigin}`;
-        lines.push(``, `[Book on Google Flights](${gfLink})`);
-      }
+      const gfLink = `https://www.google.com/travel/flights?q=Flights+to+${route.dest}+from+${bestOrigin}`;
+      lines.push(``, `[Book on Google Flights](${gfLink})`);
 
       await sendTelegram(lines.join("\n"));
       dispatchedCount++;
@@ -425,33 +404,29 @@ if (routeArg) {
       const ret = getDateStr(w * 7 + 7);
       process.stdout.write(`  Week ${w} (${dep})... `);
 
-      const body = oneWay
-        ? { origin, destination: dest, departure_date: dep }
-        : { origin, destination: dest, departure_date: dep, return_date: ret };
+      try {
+        const url = oneWay
+          ? `https://api.flightapi.io/onewaytrip/${apiKey}/${origin}/${dest}/${dep}/1/0/0/Economy/INR`
+          : `https://api.flightapi.io/roundtrip/${apiKey}/${origin}/${dest}/${dep}/${ret}/1/0/0/Economy/INR`;
 
-      const endpoint = oneWay ? "one-way" : "round-trip";
+        const res = await fetch(url);
+        if (!res.ok) { console.log("error"); continue; }
 
-      const res = await fetch(`https://ignav.com/api/fares/${endpoint}`, {
-        method: "POST",
-        headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+        const json = await res.json();
+        const itins = json.itineraries || [];
+        console.log(`${itins.length} fares`);
 
-      if (!res.ok) { console.log("error"); continue; }
-
-      const json = await res.json();
-      const itins = json.itineraries || [];
-      console.log(`${itins.length} fares`);
-
-      for (const it of itins) {
-        const p = it.price?.amount || Infinity;
-        if (p < bestPrice) {
-          bestPrice = p;
-          bestFlight = it;
-          bestDep = dep;
+        for (const it of itins) {
+          const p = it.pricing_options?.[0]?.price?.amount || Infinity;
+          if (p < bestPrice) {
+            bestPrice = p;
+            bestFlight = it;
+            bestFlight._legs = json.legs || [];
+            bestDep = dep;
+          }
         }
-      }
-      await new Promise(r => setTimeout(r, 300));
+      } catch { console.log("error"); }
+      await new Promise(r => setTimeout(r, 500));
     }
 
     if (!bestFlight) {
@@ -459,11 +434,13 @@ if (routeArg) {
       return;
     }
 
-    const priceInr = Math.round(bestPrice * CONFIG.usdToInr);
-    const depDate = bestFlight.outbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
-    const retDate = bestFlight.inbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
-    const airline = bestFlight.outbound?.carrier || "Multiple";
-    const stops = bestFlight.outbound?.segments?.length - 1 || 0;
+    const priceInr = Math.round(bestPrice);
+    const depLeg = bestFlight._legs?.[0];
+    const retLeg = bestFlight._legs?.[1];
+    const depDate = depLeg?.departureDateTime?.split("T")[0] || "TBA";
+    const retDate = retLeg?.departureDateTime?.split("T")[0] || "TBA";
+    const airline = depLeg?.airlineCodes?.[0] || "Multiple";
+    const stops = depLeg?.stopoversCount || 0;
 
     console.log(`\n========================================`);
     console.log(`BEST FARE: ${origin} → ${dest} (${label})`);
@@ -474,6 +451,7 @@ if (routeArg) {
     console.log(`Stops:     ${stops === 0 ? "Nonstop" : stops + " stop(s)"}`);
     console.log(`========================================\n`);
 
+    const gfLink = `https://www.google.com/travel/flights?q=Flights+to+${dest}+from+${origin}`;
     const msg = [
       `🔍 *Route Search: ${origin} → ${dest}* (${label})`,
       ``,
@@ -481,6 +459,8 @@ if (routeArg) {
       `🗓️ ${depDate}${oneWay ? "" : " → " + retDate}`,
       `✈️ ${airline}`,
       `🚦 ${stops === 0 ? "Nonstop" : stops + " stop(s)"}`,
+      ``,
+      `[Book on Google Flights](${gfLink})`,
     ].join("\n");
     await sendTelegram(msg);
     console.log("Sent to Telegram.");
