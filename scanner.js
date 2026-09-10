@@ -304,7 +304,97 @@ async function runEngine() {
   console.log(`\nDone. Sent ${dispatchedCount} alerts.`);
 }
 
-runEngine().catch(err => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+// ==========================================
+// CLI: Search a specific route on demand
+// ==========================================
+const args = process.argv.slice(2);
+const routeArg = args.find(a => a.startsWith("--route="))?.split("=")[1];
+
+if (routeArg) {
+  const [origin, dest] = routeArg.toUpperCase().split("-");
+  if (!origin || !dest) {
+    console.error("Usage: node scanner.js --route=DEL-BKK");
+    process.exit(1);
+  }
+
+  console.log(`\nSearching ${origin} → ${dest} across 4 weeks...\n`);
+
+  (async () => {
+    const apiKey = process.env.IGNAV_API_KEY;
+    if (!apiKey) throw new Error("Missing IGNAV_API_KEY");
+
+    let bestFlight = null;
+    let bestPrice = Infinity;
+    let bestDep = "";
+
+    for (let w = 1; w <= 4; w++) {
+      const dep = getDateStr(w * 7);
+      const ret = getDateStr(w * 7 + 7);
+      process.stdout.write(`  Week ${w} (${dep} → ${ret})... `);
+
+      const res = await fetch("https://ignav.com/api/fares/round-trip", {
+        method: "POST",
+        headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, destination: dest, departure_date: dep, return_date: ret }),
+      });
+
+      if (!res.ok) { console.log("error"); continue; }
+
+      const json = await res.json();
+      const itins = json.itineraries || [];
+      console.log(`${itins.length} fares`);
+
+      for (const it of itins) {
+        const p = it.price?.amount || Infinity;
+        if (p < bestPrice) {
+          bestPrice = p;
+          bestFlight = it;
+          bestDep = dep;
+        }
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    if (!bestFlight) {
+      console.log("\nNo fares found.");
+      return;
+    }
+
+    const priceInr = Math.round(bestPrice * CONFIG.usdToInr);
+    const depDate = bestFlight.outbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
+    const retDate = bestFlight.inbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
+    const airline = bestFlight.outbound?.carrier || "Multiple";
+    const stops = bestFlight.outbound?.segments?.length - 1 || 0;
+
+    console.log(`\n========================================`);
+    console.log(`BEST FARE: ${origin} → ${dest}`);
+    console.log(`========================================`);
+    console.log(`Price:     ₹${priceInr.toLocaleString("en-IN")} round-trip`);
+    console.log(`Dates:     ${depDate} → ${retDate}`);
+    console.log(`Airline:   ${airline}`);
+    console.log(`Stops:     ${stops === 0 ? "Nonstop" : stops + " stop(s)"}`);
+    console.log(`========================================\n`);
+
+    // Also send to Telegram
+    const msg = [
+      `🔍 *Route Search: ${origin} → ${dest}*`,
+      ``,
+      `💰 *₹${priceInr.toLocaleString("en-IN")}* round-trip`,
+      `🗓️ ${depDate} → ${retDate}`,
+      `✈️ ${airline}`,
+      `🚦 ${stops === 0 ? "Nonstop" : stops + " stop(s)"}`,
+    ].join("\n");
+    await sendTelegram(msg);
+    console.log("Sent to Telegram.");
+  })().catch(err => {
+    console.error("Error:", err.message);
+    process.exit(1);
+  });
+
+} else {
+  // Normal scheduled scan
+  runEngine().catch(err => {
+    console.error("Fatal error:", err);
+    process.exit(1);
+  });
+}
