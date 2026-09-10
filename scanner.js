@@ -188,16 +188,12 @@ async function searchFlights(origin, dest) {
   let bestFlight = null;
   let bestPrice = Infinity;
 
-  for (const window of CONFIG.dateWindows) {
+    for (const window of CONFIG.dateWindows) {
+    const body = { origin, destination: dest, departure_date: getDateStr(window.dep), return_date: getDateStr(window.ret) };
     const res = await fetch("https://ignav.com/api/fares/round-trip", {
       method: "POST",
       headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        origin,
-        destination: dest,
-        departure_date: getDateStr(window.dep),
-        return_date: getDateStr(window.ret),
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) continue;
@@ -212,6 +208,21 @@ async function searchFlights(origin, dest) {
     }
 
     await new Promise(r => setTimeout(r, 200));
+  }
+
+  // Get booking links
+  if (bestFlight?.ignav_id) {
+    try {
+      const res = await fetch("https://ignav.com/api/fares/booking-links", {
+        method: "POST",
+        headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ ignav_id: bestFlight.ignav_id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        bestFlight._bookingLinks = data.booking_options || [];
+      }
+    } catch {}
   }
 
   return bestFlight;
@@ -336,6 +347,20 @@ async function runEngine() {
       if (stats) lines.push(`📈 History: avg ₹${stats.avg.toLocaleString("en-IN")} | low ₹${stats.min.toLocaleString("en-IN")}`);
       lines.push(``, `🗓️ ${depDate} → ${retDate}`, `✈️ ${airline}`, `🛂 ${route.visa}`);
 
+      // Add booking links
+      const bookingLinks = bestOverall._bookingLinks || [];
+      if (bookingLinks.length > 0) {
+        lines.push(``, `🔗 *Book:*`);
+        for (const option of bookingLinks.slice(0, 2)) {
+          for (const link of (option.links || []).slice(0, 1)) {
+            if (link.url) lines.push(`[${link.provider || "Book"}](${link.url})`);
+          }
+        }
+      } else {
+        const gfLink = `https://www.google.com/travel/flights?q=Flights+to+${route.dest}+from+${bestOrigin}`;
+        lines.push(``, `[Book on Google Flights](${gfLink})`);
+      }
+
       await sendTelegram(lines.join("\n"));
       dispatchedCount++;
       alertHistory[routeKey] = { price: priceInr, timestamp: Date.now() };
@@ -393,6 +418,7 @@ if (routeArg) {
 
     let bestFlight = null;
     let bestPrice = Infinity;
+    let bestDep = "";
 
     for (let w = 1; w <= 4; w++) {
       const dep = getDateStr(w * 7);

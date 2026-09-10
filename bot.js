@@ -42,7 +42,6 @@ async function searchFlights(origin, dest, type = "round") {
   let bestPrice = Infinity;
 
   if (type === "oneway") {
-    // One-way: search next 4 weeks
     for (let w = 1; w <= 4; w++) {
       const dep = getDateStr(w * 7);
       try {
@@ -61,7 +60,6 @@ async function searchFlights(origin, dest, type = "round") {
       await new Promise(r => setTimeout(r, 200));
     }
   } else {
-    // Round-trip: search next 4 weeks
     for (let w = 1; w <= 4; w++) {
       const dep = getDateStr(w * 7);
       const ret = getDateStr(w * 7 + 7);
@@ -80,6 +78,21 @@ async function searchFlights(origin, dest, type = "round") {
       } catch {}
       await new Promise(r => setTimeout(r, 200));
     }
+  }
+
+  // Get booking links if we have a flight
+  if (bestFlight?.ignav_id) {
+    try {
+      const res = await fetch("https://ignav.com/api/fares/booking-links", {
+        method: "POST",
+        headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ ignav_id: bestFlight.ignav_id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        bestFlight._bookingLinks = data.booking_options || [];
+      }
+    } catch {}
   }
 
   return bestFlight;
@@ -151,6 +164,24 @@ async function handleCommand(chatId, text) {
   if (type === "round") {
     const retDate = best.inbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
     lines.splice(3, 0, `🔄 Return: ${retDate}`);
+  }
+
+  // Add booking links
+  const bookingLinks = best._bookingLinks || [];
+  if (bookingLinks.length > 0) {
+    lines.push(``, `🔗 *Book now:*`);
+    for (const option of bookingLinks.slice(0, 3)) {
+      const links = option.links || [];
+      for (const link of links.slice(0, 2)) {
+        if (link.url) {
+          lines.push(`• [${link.provider || "Book"}](${link.url})`);
+        }
+      }
+    }
+  } else {
+    // Fallback to Google Flights
+    const gfLink = `https://www.google.com/travel/flights?q=Flights+to+${dest}+from+${origin}`;
+    lines.push(``, `🔗 [Search on Google Flights](${gfLink})`);
   }
 
   await sendMessage(chatId, lines.join("\n"));
