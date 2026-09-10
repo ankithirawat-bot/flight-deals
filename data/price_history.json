@@ -1,0 +1,116 @@
+{
+  "BOM-DPS": [
+    {
+      "price": 51912,
+      "timestamp": 1789040595493
+    }
+  ],
+  "DEL-BKK": [
+    {
+      "price": 24864,
+      "timestamp": 1789040597875
+    }
+  ],
+  "BLR-SIN": [
+    {
+      "price": 29484,
+      "timestamp": 1789040599575
+    }
+  ],
+  "MAA-KUL": [
+    {
+      "price": 28056,
+      "timestamp": 1789040600807
+    }
+  ],
+  "BOM-HAN": [
+    {
+      "price": 32340,
+      "timestamp": 1789040602032
+    }
+  ],
+  "BOM-NRT": [
+    {
+      "price": 56868,
+      "timestamp": 1789040603254
+    }
+  ],
+  "DEL-ICN": [
+    {
+      "price": 38556,
+      "timestamp": 1789040604510
+    }
+  ],
+  "DEL-DXB": [
+    {
+      "price": 24444,
+      "timestamp": 1789040605761
+    }
+  ],
+  "DEL-ALA": [
+    {
+      "price": 39144,
+      "timestamp": 1789040606968
+    }
+  ],
+  "BOM-TBS": [
+    {
+      "price": 34860,
+      "timestamp": 1789040610462
+    }
+  ],
+  "BOM-CDG": [
+    {
+      "price": 44436,
+      "timestamp": 1789040614776
+    }
+  ],
+  "DEL-MXP": [
+    {
+      "price": 41916,
+      "timestamp": 1789040618889
+    }
+  ],
+  "BOM-LHR": [
+    {
+      "price": 51576,
+      "timestamp": 1789040622508
+    }
+  ],
+  "PNQ-BKK": [
+    {
+      "price": 18564,
+      "timestamp": 1789040639562
+    }
+  ],
+  "PNQ-DXB": [
+    {
+      "price": 21252,
+      "timestamp": 1789040648593
+    }
+  ],
+  "CCU-BKK": [
+    {
+      "price": 14784,
+      "timestamp": 1789040649824
+    }
+  ],
+  "CCU-SIN": [
+    {
+      "price": 32592,
+      "timestamp": 1789040659036
+    }
+  ],
+  "TRV-KUL": [
+    {
+      "price": 19824,
+      "timestamp": 1789040660259
+    }
+  ],
+  "CCJ-SIN": [
+    {
+      "price": 124992,
+      "timestamp": 1789040661484
+    }
+  ]
+}

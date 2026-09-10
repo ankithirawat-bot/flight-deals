@@ -4,44 +4,82 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// ==========================================
+// CONFIGURATION
+// ==========================================
 const CONFIG = {
   usdToInr: 84.0,
-  historyFilePath: path.resolve("./deals_cache.json"),
+  alertHistoryPath: path.resolve("./data/alert_history.json"),
+  priceHistoryPath: path.resolve("./data/price_history.json"),
   dedupTtlHours: 48,
+  dateWindows: [
+    { dep: 21, ret: 28 },
+    { dep: 35, ret: 42 },
+  ],
 };
 
+// ==========================================
+// NEARBY AIRPORTS
+// ==========================================
+const NEARBY_ORIGINS = {
+  BOM: ["BOM", "PNQ"],       // Mumbai, Pune
+  DEL: ["DEL", "CCU"],       // Delhi, Kolkata
+  BLR: ["BLR", "CCJ"],       // Bangalore, Kochi
+  MAA: ["MAA", "TRV"],       // Chennai, Trivandrum
+};
+
+// ==========================================
+// WATCHED ROUTES
+// ==========================================
 const WATCHED_ROUTES = [
   // Southeast Asia
-  { origin: "BOM", dest: "DPS", name: "Bali, Indonesia", baselineInr: 38000, dealThresholdInr: 24000, visa: "Visa on Arrival (30 Days)" },
-  { origin: "DEL", dest: "BKK", name: "Bangkok, Thailand", baselineInr: 32000, dealThresholdInr: 19000, visa: "Visa-Free / VoA" },
-  { origin: "BLR", dest: "SIN", name: "Singapore", baselineInr: 35000, dealThresholdInr: 22000, visa: "eVisa required" },
-  { origin: "MAA", dest: "KUL", name: "Kuala Lumpur, Malaysia", baselineInr: 30000, dealThresholdInr: 18000, visa: "Visa-Free entry" },
-  { origin: "BOM", dest: "HAN", name: "Hanoi, Vietnam", baselineInr: 35000, dealThresholdInr: 22000, visa: "30-day eVisa" },
+  { origins: ["BOM"], dest: "DPS", name: "Bali, Indonesia", baselineInr: 38000, dealThresholdInr: 24000, visa: "Visa on Arrival (30 Days)" },
+  { origins: ["DEL"], dest: "BKK", name: "Bangkok, Thailand", baselineInr: 32000, dealThresholdInr: 19000, visa: "Visa-Free / VoA" },
+  { origins: ["BLR"], dest: "SIN", name: "Singapore", baselineInr: 35000, dealThresholdInr: 22000, visa: "eVisa required" },
+  { origins: ["MAA"], dest: "KUL", name: "Kuala Lumpur, Malaysia", baselineInr: 30000, dealThresholdInr: 18000, visa: "Visa-Free entry" },
+  { origins: ["BOM"], dest: "HAN", name: "Hanoi, Vietnam", baselineInr: 35000, dealThresholdInr: 22000, visa: "30-day eVisa" },
 
   // East Asia
-  { origin: "BOM", dest: "NRT", name: "Tokyo, Japan", baselineInr: 65000, dealThresholdInr: 38000, visa: "eVisa required" },
-  { origin: "DEL", dest: "ICN", name: "Seoul, South Korea", baselineInr: 45000, dealThresholdInr: 28000, visa: "Standard Tourist Visa" },
+  { origins: ["BOM"], dest: "NRT", name: "Tokyo, Japan", baselineInr: 65000, dealThresholdInr: 38000, visa: "eVisa required" },
+  { origins: ["DEL"], dest: "ICN", name: "Seoul, South Korea", baselineInr: 45000, dealThresholdInr: 28000, visa: "Standard Tourist Visa" },
 
   // Middle East & Central Asia
-  { origin: "DEL", dest: "DXB", name: "Dubai, UAE", baselineInr: 30000, dealThresholdInr: 17000, visa: "Pre-arranged or VoA with US/UK Visa" },
-  { origin: "DEL", dest: "ALA", name: "Almaty, Kazakhstan", baselineInr: 55000, dealThresholdInr: 32000, visa: "Visa-Free (14 Days)" },
-  { origin: "BOM", dest: "TBS", name: "Tbilisi, Georgia", baselineInr: 50000, dealThresholdInr: 30000, visa: "eVisa required" },
+  { origins: ["DEL"], dest: "DXB", name: "Dubai, UAE", baselineInr: 30000, dealThresholdInr: 17000, visa: "Pre-arranged or VoA with US/UK Visa" },
+  { origins: ["DEL"], dest: "ALA", name: "Almaty, Kazakhstan", baselineInr: 55000, dealThresholdInr: 32000, visa: "Visa-Free (14 Days)" },
+  { origins: ["BOM"], dest: "TBS", name: "Tbilisi, Georgia", baselineInr: 50000, dealThresholdInr: 30000, visa: "eVisa required" },
 
   // Europe & UK
-  { origin: "BOM", dest: "CDG", name: "Paris, France", baselineInr: 70000, dealThresholdInr: 42000, visa: "Schengen Visa" },
-  { origin: "DEL", dest: "MXP", name: "Milan, Italy", baselineInr: 65000, dealThresholdInr: 40000, visa: "Schengen Visa" },
-  { origin: "BOM", dest: "LHR", name: "London, UK", baselineInr: 75000, dealThresholdInr: 45000, visa: "UK Standard Visitor Visa" }
+  { origins: ["BOM"], dest: "CDG", name: "Paris, France", baselineInr: 70000, dealThresholdInr: 42000, visa: "Schengen Visa" },
+  { origins: ["DEL"], dest: "MXP", name: "Milan, Italy", baselineInr: 65000, dealThresholdInr: 40000, visa: "Schengen Visa" },
+  { origins: ["BOM"], dest: "LHR", name: "London, UK", baselineInr: 75000, dealThresholdInr: 45000, visa: "UK Standard Visitor Visa" },
+
+  // Nearby airport routes
+  { origins: ["PNQ"], dest: "BKK", name: "Bangkok via Pune", baselineInr: 32000, dealThresholdInr: 19000, visa: "Visa-Free / VoA" },
+  { origins: ["PNQ"], dest: "DXB", name: "Dubai via Pune", baselineInr: 30000, dealThresholdInr: 17000, visa: "Pre-arranged or VoA" },
+  { origins: ["CCU"], dest: "BKK", name: "Bangkok via Kolkata", baselineInr: 32000, dealThresholdInr: 19000, visa: "Visa-Free / VoA" },
+  { origins: ["CCU"], dest: "SIN", name: "Singapore via Kolkata", baselineInr: 35000, dealThresholdInr: 22000, visa: "eVisa required" },
+  { origins: ["TRV"], dest: "KUL", name: "KL via Trivandrum", baselineInr: 30000, dealThresholdInr: 18000, visa: "Visa-Free entry" },
+  { origins: ["CCJ"], dest: "SIN", name: "Singapore via Kochi", baselineInr: 35000, dealThresholdInr: 22000, visa: "eVisa required" },
 ];
 
-function loadAlertHistory() {
-  if (fs.existsSync(CONFIG.historyFilePath)) {
-    try { return JSON.parse(fs.readFileSync(CONFIG.historyFilePath, "utf8")); } catch { return {}; }
+// ==========================================
+// DATA LAYER
+// ==========================================
+function ensureDataDir() {
+  const dir = path.dirname(CONFIG.alertHistoryPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function loadJSON(filePath) {
+  if (fs.existsSync(filePath)) {
+    try { return JSON.parse(fs.readFileSync(filePath, "utf8")); } catch { return {}; }
   }
   return {};
 }
 
-function saveAlertHistory(history) {
-  fs.writeFileSync(CONFIG.historyFilePath, JSON.stringify(history, null, 2), "utf8");
+function saveJSON(filePath, data) {
+  ensureDataDir();
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
 }
 
 function isRecentDuplicate(history, routeKey, price) {
@@ -49,6 +87,23 @@ function isRecentDuplicate(history, routeKey, price) {
   if (!record) return false;
   const hoursSince = (Date.now() - record.timestamp) / (1000 * 60 * 60);
   return hoursSince < CONFIG.dedupTtlHours && price >= record.price * 0.95;
+}
+
+function updatePriceHistory(priceHistory, routeKey, price) {
+  if (!priceHistory[routeKey]) priceHistory[routeKey] = [];
+  priceHistory[routeKey].push({ price, timestamp: Date.now() });
+  // Keep last 90 days only
+  const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  priceHistory[routeKey] = priceHistory[routeKey].filter(p => p.timestamp > cutoff);
+}
+
+function getHistoricalStats(priceHistory, routeKey) {
+  const prices = (priceHistory[routeKey] || []).map(p => p.price);
+  if (prices.length < 2) return null;
+  const avg = Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  return { avg, min, max, count: prices.length };
 }
 
 function getDateStr(daysFromNow) {
@@ -62,36 +117,27 @@ function getDateStr(daysFromNow) {
 // ==========================================
 async function searchFlights(origin, dest) {
   const apiKey = process.env.IGNAV_API_KEY;
-  if (!apiKey) throw new Error("Missing IGNAV_API_KEY in .env — sign up at https://ignav.com");
+  if (!apiKey) throw new Error("Missing IGNAV_API_KEY in .env");
 
   let bestFlight = null;
   let bestPrice = Infinity;
 
-  // Search across multiple departure dates (next 3-4 weeks)
-  for (let weekOffset = 2; weekOffset <= 3; weekOffset++) {
-    const depDate = getDateStr(weekOffset * 7);
-    const retDate = getDateStr(weekOffset * 7 + 7);
-
+  for (const window of CONFIG.dateWindows) {
     const res = await fetch("https://ignav.com/api/fares/round-trip", {
       method: "POST",
-      headers: {
-        "X-Api-Key": apiKey,
-        "Content-Type": "application/json",
-      },
+      headers: { "X-Api-Key": apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({
         origin,
         destination: dest,
-        departure_date: depDate,
-        return_date: retDate,
+        departure_date: getDateStr(window.dep),
+        return_date: getDateStr(window.ret),
       }),
     });
 
     if (!res.ok) continue;
 
     const json = await res.json();
-    const itineraries = json.itineraries || [];
-
-    for (const it of itineraries) {
+    for (const it of (json.itineraries || [])) {
       const price = it.price?.amount || Infinity;
       if (price < bestPrice) {
         bestPrice = price;
@@ -103,6 +149,37 @@ async function searchFlights(origin, dest) {
   }
 
   return bestFlight;
+}
+
+// ==========================================
+// SECRET FLYING SCRAPER
+// ==========================================
+async function fetchSecretFlyingDeals() {
+  try {
+    const res = await fetch("https://secretflying.com/feed/", {
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    if (!res.ok) return [];
+    const xml = await res.text();
+
+    const deals = [];
+    const items = xml.split("<item>").slice(1, 6); // Get last 5 posts
+    for (const item of items) {
+      const title = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] ||
+                    item.match(/<title>(.*?)<\/title>/)?.[1] || "";
+      const link = item.match(/<link>(.*?)<\/link>/)?.[1] || "";
+      const desc = item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/)?.[1] ||
+                   item.match(/<description>(.*?)<\/description>/)?.[1] || "";
+
+      // Extract prices mentioned (₹, $, €, £)
+      const priceMatch = desc.match(/[₹$€£]\s*[\d,]+/g) || [];
+
+      deals.push({ title: title.trim(), link, prices: priceMatch });
+    }
+    return deals;
+  } catch {
+    return [];
+  }
 }
 
 // ==========================================
@@ -126,52 +203,105 @@ async function sendTelegram(text) {
 // ==========================================
 async function runEngine() {
   console.log(`[${new Date().toISOString()}] Scanning flight deals...\n`);
-  const alertHistory = loadAlertHistory();
+  ensureDataDir();
+  const alertHistory = loadJSON(CONFIG.alertHistoryPath);
+  const priceHistory = loadJSON(CONFIG.priceHistoryPath);
   let dispatchedCount = 0;
 
+  // 1. Scan flight routes (with nearby airports)
   for (const route of WATCHED_ROUTES) {
-    process.stdout.write(`${route.origin} -> ${route.dest} (${route.name})... `);
-    const best = await searchFlights(route.origin, route.dest);
-    if (!best) { console.log("no results"); continue; }
+    let bestOverall = null;
+    let bestPriceOverall = Infinity;
+    let bestOrigin = route.origins[0];
 
-    const priceInr = Math.round(best.price.amount * CONFIG.usdToInr);
-    const routeKey = `${route.origin}-${route.dest}`;
+    for (const origin of route.origins) {
+      process.stdout.write(`  ${origin} -> ${route.dest}... `);
+      const best = await searchFlights(origin, route.dest);
+      if (best && (best.price?.amount || Infinity) < bestPriceOverall) {
+        bestPriceOverall = best.price.amount;
+        bestOverall = best;
+        bestOrigin = origin;
+      }
+    }
+
+    if (!bestOverall) { console.log(`${route.name}: no results`); continue; }
+
+    const priceInr = Math.round(bestOverall.price.amount * CONFIG.usdToInr);
+    const routeKey = `${bestOrigin}-${route.dest}`;
+    const stats = getHistoricalStats(priceHistory, routeKey);
+
+    // Track price history
+    updatePriceHistory(priceHistory, routeKey, priceInr);
+
+    // Calculate deal score
+    let dealLabel = "";
+    let isDeal = false;
 
     if (priceInr <= route.dealThresholdInr) {
+      isDeal = true;
+      const discountPct = Math.round(((route.baselineInr - priceInr) / route.baselineInr) * 100);
+      if (discountPct >= 55) dealLabel = "🔥 MISTAKE FARE";
+      else if (discountPct >= 45) dealLabel = "🔥 INSANE DEAL";
+      else dealLabel = "🚨 FLIGHT DEAL";
+    } else if (stats && priceInr <= stats.avg * 0.85) {
+      isDeal = true;
+      dealLabel = "📉 BELOW AVERAGE";
+    }
+
+    if (isDeal) {
       if (isRecentDuplicate(alertHistory, routeKey, priceInr)) {
-        console.log(`skip (₹${priceInr})`);
+        console.log(`${route.name}: skip duplicate ₹${priceInr}`);
         continue;
       }
 
       const discountPct = Math.round(((route.baselineInr - priceInr) / route.baselineInr) * 100);
-      const isMistakeFare = discountPct >= 55;
-      const depDate = best.outbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
-      const airline = best.outbound?.carrier || "Multiple";
+      const depDate = bestOverall.outbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
+      const retDate = bestOverall.inbound?.segments?.[0]?.departure_time_local?.split("T")[0] || "TBA";
+      const airline = bestOverall.outbound?.carrier || "Multiple";
 
-      const msg = [
-        `${isMistakeFare ? "🔥 *MISTAKE FARE*" : "🚨 *FLIGHT DEAL*"}`,
-        `*${route.origin} → ${route.name} (${route.dest})*`,
+      const lines = [
+        `${dealLabel}`,
+        `*${bestOrigin} → ${route.name} (${route.dest})*`,
         ``,
-        `💰 *₹${priceInr.toLocaleString("en-IN")}* round-trip (*${discountPct}% off*)`,
-        `📊 Typical: ₹${route.baselineInr.toLocaleString("en-IN")}`,
-        `🗓️ ${depDate}`,
-        `✈️ ${airline}`,
-        `🛂 ${route.visa}`,
-      ].join("\n");
+        `💰 *₹${priceInr.toLocaleString("en-IN")}* round-trip`,
+      ];
 
-      await sendTelegram(msg);
+      if (discountPct > 0) lines.push(`📊 Typical: ₹${route.baselineInr.toLocaleString("en-IN")} (*${discountPct}% off*)`);
+      if (stats) lines.push(`📈 History: avg ₹${stats.avg.toLocaleString("en-IN")} | low ₹${stats.min.toLocaleString("en-IN")}`);
+      lines.push(``, `🗓️ ${depDate} → ${retDate}`, `✈️ ${airline}`, `🛂 ${route.visa}`);
+
+      await sendTelegram(lines.join("\n"));
       dispatchedCount++;
       alertHistory[routeKey] = { price: priceInr, timestamp: Date.now() };
-      console.log(`DEAL ₹${priceInr}`);
+      console.log(`${route.name}: ${dealLabel} ₹${priceInr}`);
     } else {
-      console.log(`₹${priceInr} (no deal)`);
+      console.log(`${route.name}: ₹${priceInr}`);
     }
 
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 300));
   }
 
-  saveAlertHistory(alertHistory);
-  console.log(`\nDone. Sent ${dispatchedCount} deal alerts.`);
+  // 2. Fetch Secret Flying deals
+  console.log(`\nFetching Secret Flying deals...`);
+  const sfDeals = await fetchSecretFlyingDeals();
+  if (sfDeals.length > 0) {
+    const sfKey = "secret-flying";
+    if (!isRecentDuplicate(alertHistory, sfKey, 0)) {
+      const lines = [`🌐 *SECRET FLYING - Latest Deals*`, ``];
+      for (const deal of sfDeals.slice(0, 3)) {
+        lines.push(`• ${deal.title}`);
+        if (deal.prices.length) lines.push(`  ${deal.prices.join(" | ")}`);
+        lines.push(`  [Link](${deal.link})`, ``);
+      }
+      await sendTelegram(lines.join("\n"));
+      dispatchedCount++;
+      alertHistory[sfKey] = { price: 0, timestamp: Date.now() };
+    }
+  }
+
+  saveJSON(CONFIG.alertHistoryPath, alertHistory);
+  saveJSON(CONFIG.priceHistoryPath, priceHistory);
+  console.log(`\nDone. Sent ${dispatchedCount} alerts.`);
 }
 
 runEngine().catch(err => {
