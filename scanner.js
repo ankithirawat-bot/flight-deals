@@ -46,7 +46,10 @@ const WATCHED_ROUTES = [
   // Middle East & Central Asia
   { origins: ["DEL"], dest: "DXB", name: "Dubai, UAE", baselineInr: 30000, dealThresholdInr: 17000, visa: "Pre-arranged or VoA with US/UK Visa" },
   { origins: ["DEL"], dest: "ALA", name: "Almaty, Kazakhstan", baselineInr: 55000, dealThresholdInr: 32000, visa: "Visa-Free (14 Days)" },
+  { origins: ["DEL"], dest: "TAS", name: "Tashkent, Uzbekistan", baselineInr: 45000, dealThresholdInr: 28000, visa: "Visa-Free (30 Days)" },
+  { origins: ["DEL"], dest: "BOM", name: "Bukhara, Uzbekistan", baselineInr: 50000, dealThresholdInr: 30000, visa: "Visa-Free (30 Days)" },
   { origins: ["BOM"], dest: "TBS", name: "Tbilisi, Georgia", baselineInr: 50000, dealThresholdInr: 30000, visa: "eVisa required" },
+  { origins: ["BOM"], dest: "ALA", name: "Almaty via Mumbai", baselineInr: 55000, dealThresholdInr: 32000, visa: "Visa-Free (14 Days)" },
 
   // Europe & UK
   { origins: ["BOM"], dest: "CDG", name: "Paris, France", baselineInr: 70000, dealThresholdInr: 42000, visa: "Schengen Visa" },
