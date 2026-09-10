@@ -60,7 +60,7 @@ async function searchFlights(origin, dest, type = "round") {
           bestPrice = price;
           bestFlight = it;
           bestFlight._legs = json.legs || [];
-          bestFlight._segments = json.segments || [];
+          bestFlight._carriers = json.carriers || {};
         }
       }
     } catch {}
@@ -121,12 +121,15 @@ async function handleCommand(chatId, text) {
   if (!best) { await sendMessage(chatId, `No fares found for ${origin} → ${dest}`); return; }
 
   const priceInr = Math.round(best.pricing_options?.[0]?.price?.amount || 0);
-  const depLeg = best._legs?.[0];
-  const retLeg = best._legs?.[1];
-  const depDate = depLeg?.departureDateTime?.split("T")[0] || "TBA";
-  const retDate = retLeg?.departureDateTime?.split("T")[0] || "TBA";
-  const airline = depLeg?.airlineCodes?.[0] || "Multiple";
-  const stops = depLeg?.stopoversCount || 0;
+  const depLegId = best.leg_ids?.[0];
+  const depLeg = best._legs?.find(l => l.id === depLegId);
+  const retLegId = best.leg_ids?.[1];
+  const retLeg = best._legs?.find(l => l.id === retLegId);
+  const depDate = depLeg?.departure?.split("T")[0] || "TBA";
+  const retDate = retLeg?.departure?.split("T")[0] || "TBA";
+  const carrierId = Math.abs(depLeg?.marketing_carrier_ids?.[0] || 0);
+  const airline = Object.values(best._carriers || {}).find(c => Math.abs(c.id) === carrierId)?.display_code || "Multiple";
+  const stops = depLeg?.stop_count || 0;
 
   const lines = [
     `✅ *${origin} → ${dest}* (${label})`, ``,

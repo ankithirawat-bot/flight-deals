@@ -14,7 +14,6 @@ const CONFIG = {
   dedupTtlHours: 48,
   dateWindows: [
     { dep: 21, ret: 28 },
-    { dep: 35, ret: 42 },
   ],
 };
 
@@ -193,7 +192,10 @@ async function searchFlights(origin, dest) {
     const ret = getDateStr(window.ret);
     const url = `https://api.flightapi.io/roundtrip/${apiKey}/${origin}/${dest}/${dep}/${ret}/1/0/0/Economy/INR`;
     try {
-      const res = await fetch(url);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
       if (!res.ok) continue;
       const json = await res.json();
       const itins = json.itineraries || [];
@@ -203,7 +205,7 @@ async function searchFlights(origin, dest) {
           bestPrice = price;
           bestFlight = it;
           bestFlight._legs = json.legs || [];
-          bestFlight._segments = json.segments || [];
+          bestFlight._carriers = json.carriers || {};
         }
       }
     } catch {}
@@ -320,11 +322,14 @@ async function runEngine() {
       }
 
       const discountPct = Math.round(((route.baselineInr - priceInr) / route.baselineInr) * 100);
-      const depLeg = bestOverall._legs?.[0];
-      const retLeg = bestOverall._legs?.[1];
-      const depDate = depLeg?.departureDateTime?.split("T")[0] || "TBA";
-      const retDate = retLeg?.departureDateTime?.split("T")[0] || "TBA";
-      const airline = depLeg?.airlineCodes?.[0] || "Multiple";
+      const depLegId = bestOverall.leg_ids?.[0];
+      const depLeg = bestOverall._legs?.find(l => l.id === depLegId);
+      const retLegId = bestOverall.leg_ids?.[1];
+      const retLeg = bestOverall._legs?.find(l => l.id === retLegId);
+      const depDate = depLeg?.departure?.split("T")[0] || "TBA";
+      const retDate = retLeg?.departure?.split("T")[0] || "TBA";
+      const carrierId = Math.abs(depLeg?.marketing_carrier_ids?.[0] || 0);
+      const airline = Object.values(bestOverall._carriers || {}).find(c => Math.abs(c.id) === carrierId)?.display_code || "Multiple";
 
       const lines = [
         `${dealLabel}`,
@@ -392,8 +397,8 @@ if (routeArg) {
   console.log(`\nSearching ${origin} → ${dest} (${label}) across 4 weeks...\n`);
 
   (async () => {
-    const apiKey = process.env.IGNAV_API_KEY;
-    if (!apiKey) throw new Error("Missing IGNAV_API_KEY");
+    const apiKey = process.env.FLIGHTAPI_KEY;
+    if (!apiKey) throw new Error("Missing FLIGHTAPI_KEY in .env");
 
     let bestFlight = null;
     let bestPrice = Infinity;
@@ -404,29 +409,33 @@ if (routeArg) {
       const ret = getDateStr(w * 7 + 7);
       process.stdout.write(`  Week ${w} (${dep})... `);
 
-      try {
-        const url = oneWay
-          ? `https://api.flightapi.io/onewaytrip/${apiKey}/${origin}/${dest}/${dep}/1/0/0/Economy/INR`
-          : `https://api.flightapi.io/roundtrip/${apiKey}/${origin}/${dest}/${dep}/${ret}/1/0/0/Economy/INR`;
+    try {
+      const url = oneWay
+        ? `https://api.flightapi.io/onewaytrip/${apiKey}/${origin}/${dest}/${dep}/1/0/0/Economy/INR`
+        : `https://api.flightapi.io/roundtrip/${apiKey}/${origin}/${dest}/${dep}/${ret}/1/0/0/Economy/INR`;
 
-        const res = await fetch(url);
-        if (!res.ok) { console.log("error"); continue; }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!res.ok) { console.log("error"); continue; }
 
-        const json = await res.json();
-        const itins = json.itineraries || [];
-        console.log(`${itins.length} fares`);
+      const json = await res.json();
+      const itins = json.itineraries || [];
+      console.log(`${itins.length} fares`);
 
-        for (const it of itins) {
-          const p = it.pricing_options?.[0]?.price?.amount || Infinity;
-          if (p < bestPrice) {
-            bestPrice = p;
-            bestFlight = it;
-            bestFlight._legs = json.legs || [];
-            bestDep = dep;
-          }
+      for (const it of itins) {
+        const p = it.pricing_options?.[0]?.price?.amount || Infinity;
+        if (p < bestPrice) {
+          bestPrice = p;
+          bestFlight = it;
+          bestFlight._legs = json.legs || [];
+          bestFlight._carriers = json.carriers || {};
+          bestDep = dep;
         }
-      } catch { console.log("error"); }
-      await new Promise(r => setTimeout(r, 500));
+      }
+    } catch (e) { console.log("error"); }
+    await new Promise(r => setTimeout(r, 500));
     }
 
     if (!bestFlight) {
@@ -435,12 +444,15 @@ if (routeArg) {
     }
 
     const priceInr = Math.round(bestPrice);
-    const depLeg = bestFlight._legs?.[0];
-    const retLeg = bestFlight._legs?.[1];
-    const depDate = depLeg?.departureDateTime?.split("T")[0] || "TBA";
-    const retDate = retLeg?.departureDateTime?.split("T")[0] || "TBA";
-    const airline = depLeg?.airlineCodes?.[0] || "Multiple";
-    const stops = depLeg?.stopoversCount || 0;
+    const depLegId = bestFlight.leg_ids?.[0];
+    const depLeg = bestFlight._legs?.find(l => l.id === depLegId);
+    const retLegId = bestFlight.leg_ids?.[1];
+    const retLeg = bestFlight._legs?.find(l => l.id === retLegId);
+    const depDate = depLeg?.departure?.split("T")[0] || "TBA";
+    const retDate = retLeg?.departure?.split("T")[0] || "TBA";
+    const carrierId = Math.abs(depLeg?.marketing_carrier_ids?.[0] || 0);
+    const airline = Object.values(bestFlight._carriers || {}).find(c => Math.abs(c.id) === carrierId)?.display_code || "Multiple";
+    const stops = depLeg?.stop_count || 0;
 
     console.log(`\n========================================`);
     console.log(`BEST FARE: ${origin} → ${dest} (${label})`);
