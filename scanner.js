@@ -8,7 +8,7 @@ dotenv.config();
 // CONFIGURATION
 // ==========================================
 const CONFIG = {
-  usdToInr: 84.0,
+  usdToInr: 95.0,
   alertHistoryPath: path.resolve("./data/alert_history.json"),
   priceHistoryPath: path.resolve("./data/price_history.json"),
   dedupTtlHours: 48,

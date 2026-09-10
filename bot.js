@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const CONFIG = {
-  usdToInr: 84.0,
+  usdToInr: 95.0,
   priceHistoryPath: path.resolve("./data/price_history.json"),
 };
 
